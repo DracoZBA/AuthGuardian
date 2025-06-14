@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/mobile_navigation"
+    app:startDestination="@id/dashboardFragment3">
+    <fragment
+        android:id="@+id/calendarFragment"
+        android:name="com.example.authguardian.ui.guardian.calendar.CalendarFragment"
+        android:label="fragment_calendar2"
+        tools:layout="@layout/fragment_calendar2" />
+    <fragment
+        android:id="@+id/mapFragment"
+        android:name="com.example.authguardian.ui.guardian.map.MapFragment"
+        android:label="fragment_map2"
+        tools:layout="@layout/fragment_map2">
+        <action
+            android:id="@+id/action_mapFragment_to_geofenceSetupFragment"
+            app:destination="@id/geofenceSetupFragment" />
+    </fragment>
+    <fragment
+        android:id="@+id/settingsFragment"
+        android:name="com.example.authguardian.ui.guardian.settings.SettingsFragment"
+        android:label="fragment_settings2"
+        tools:layout="@layout/fragment_settings2" />
+    <fragment
+        android:id="@+id/graphsFragment"
+        android:name="com.example.authguardian.ui.guardian.graphs.GraphsFragment"
+        android:label="fragment_graphs2"
+        tools:layout="@layout/fragment_graphs2" />
+    <fragment
+        android:id="@+id/geofenceSetupFragment"
+        android:name="com.example.authguardian.ui.guardian.geofence.GeofenceSetupFragment"
+        android:label="fragment_geofence_setup2"
+        tools:layout="@layout/fragment_geofence_setup2" />
+    <fragment
+        android:id="@+id/dashboardFragment3"
+        android:name="com.example.authguardian.ui.guardian.dashboard.DashboardFragment"
+        android:label="fragment_dashboard4"
+        tools:layout="@layout/fragment_dashboard4">
+        <action
+            android:id="@+id/action_dashboardFragment3_to_graphsFragment"
+            app:destination="@id/graphsFragment" />
+        <action
+            android:id="@+id/action_dashboardFragment3_to_settingsFragment"
+            app:destination="@id/settingsFragment" />
+        <action
+            android:id="@+id/action_dashboardFragment3_to_mapFragment"
+            app:destination="@id/mapFragment" />
+        <action
+            android:id="@+id/action_dashboardFragment3_to_geofenceSetupFragment"
+            app:destination="@id/geofenceSetupFragment" />
+        <action
+            android:id="@+id/action_dashboardFragment3_to_calendarFragment"
+            app:destination="@id/calendarFragment" />
+    </fragment>
+</navigation>

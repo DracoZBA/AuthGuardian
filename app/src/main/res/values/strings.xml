@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Aura Guardian App</string>
+    <string name="title_dashboard">Dashboard</string>
+    <string name="title_calendar">Calendar</string>
+    <string name="title_map">Map</string>
+    <string name="title_graphs">Graphs</string>
+    <string name="title_settings">Settings</string>
+    <string name="title_geofence_setup">Geofence Setup</string>
+
+    <string name="login_button_text">Log In</string>
+    <string name="email_hint">Correo Electrónico</string>
+    <string name="password_hint">Contraseña</string>
+    <string name="welcome_message">Bienvenido a Aura Guardian</string>
+    <string name="hello_blank_fragment">Hello blank fragment</string>
+    <string name="notification_tracking_location">Tracking child\'s location...</string>
+    <string name="notification_monitoring_data">Monitoring child\'s data...</string>
+
+</resources>

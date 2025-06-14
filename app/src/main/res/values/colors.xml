@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Colores usados por tu Theme.AuthGuardian -->
+    <color name="primary_blue">#64B5F6</color>       <!-- Ejemplo de color, ajústalo a tu gusto -->
+    <color name="primary_dark_blue">#2196F3</color>  <!-- Ejemplo de color, ajústalo a tu gusto -->
+    <color name="text_light">#FFFFFF</color>         <!-- Blanco para texto sobre fondos oscuros/de color -->
+    <color name="accent_green">#81C784</color>      <!-- Ejemplo de color, ajústalo a tu gusto -->
+    <color name="background_light">#F5F5F5</color>  <!-- Un color de fondo claro -->
+    <color name="text_dark">#333333</color>          <!-- Un color de texto oscuro para fondos claros -->
+
+    <!-- Otros colores que podrías haber definido (opcional, si no los usas puedes quitarlos) -->
+    <color name="alert_red">#EF5350</color>
+    <color name="warning_orange">#FFB300</color>
+    <color name="card_background">#FFFFFF</color> <!-- Nota: text_light y card_background son iguales aquí -->
+
+    <color name="primary_blue_light_transparent">#4064B5F6</color>
+    <!-- IMPORTANTE: Si anteriormente tenías definiciones para purple_500, teal_200, etc.
+         y este es el tema que quieres usar, puedes eliminar esas definiciones de purple/teal
+         de colors.xml SI Y SOLO SI no son usadas en NINGÚN OTRO LADO (ej. un tema -night). -->
+</resources>
