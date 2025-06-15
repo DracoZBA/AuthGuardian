@@ -1,219 +1,221 @@
-package com.example.authguardian.service // Or your actual package name
+package com.example.authguardian.service
 
-import android.annotation.SuppressLint
-import android.app.Notification // Asegúrate de tener este import
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-// import android.content.Context // No se usa directamente, se puede quitar si no hay otros usos
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import com.example.authguardian.R
+import com.example.authguardian.data.repository.AuthRepository
+import com.example.authguardian.data.repository.DataRepository
+import com.example.authguardian.models.ChildLocation
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
-import com.example.authguardian.R
-import com.example.authguardian.data.local.entities.ChildLocationEntity
-import com.example.authguardian.data.repository.DataRepository
-import com.example.authguardian.ui.guardian.GuardianMainActivity
-import com.example.authguardian.util.GeofenceHelper
+import com.google.firebase.Timestamp
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.example.authguardian.ui.child.ChildMainActivity // Asume que esta es la actividad principal para el niño
 
 @AndroidEntryPoint
 class LocationTrackingService : Service() {
 
     @Inject
-    lateinit var dataRepository: DataRepository
+    lateinit var authRepository: AuthRepository
 
     @Inject
-    lateinit var geofenceHelper: GeofenceHelper
+    lateinit var dataRepository: DataRepository
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
-    private lateinit var locationRequest: LocationRequest
-
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
 
-    companion object { // Es buena práctica tener constantes en un companion object
-        private const val NOTIFICATION_CHANNEL_ID = "LocationTrackingServiceChannel"
-        private const val NOTIFICATION_ID = 102
-        private const val TAG = "LocationService" // Para logs
+    private var currentChildId: String? = null
+    private var currentGuardianId: String? = null
+
+    companion object {
+        private const val CHANNEL_ID = "LocationTrackingChannel"
+        private const val NOTIFICATION_ID = 123
+        private const val LOCATION_INTERVAL_MS = 10000L // 10 segundos
+        private const val LOCATION_FASTEST_INTERVAL_MS = 5000L // 5 segundos
     }
 
     override fun onCreate() {
         super.onCreate()
+        Log.d("LocationService", "Service onCreate")
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, createNotification()) // Esta línea ahora recibe un Notification
-        setupLocationTracking()
-    }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "Location tracking service started")
-        // Aquí podrías manejar diferentes acciones basadas en el 'intent' si es necesario
-        return START_STICKY
-    }
+        // Obtener el ID del niño y del guardián cuando el servicio se crea
+        serviceScope.launch {
+            val currentUser = authRepository.getCurrentFirebaseUser()
+            if (currentUser != null) {
+                val userProfile = authRepository.getUserProfile(currentUser.uid)
+                if (userProfile?.role == "child") {
+                    currentChildId = currentUser.uid
+                    // Si el niño se registra solo, puede que necesites un mecanismo para
+                    // que el guardián lo asocie y el niño sepa quién es su guardián.
+                    // Para el prototipo, asumiremos que de alguna manera el niño ya sabe su guardianId
+                    // o que el guardianId se recupera del perfil del niño en Firestore
+                    // (ej. si el ChildProfile tiene un campo guardianId).
+                    // Por simplicidad en el prototipo, lo hardcodeamos o lo recuperamos de un ChildProfile
+                    // ya pre-asociado por el guardián.
+                    // Aquí, una forma simple para el prototipo es buscar el guardián si el niño está solo.
+                    // En un sistema real, un ChildProfile creado por un guardián tendría el guardianId.
+                    // O el AuthRepository del niño podría almacenar el guardianId al que está asociado.
 
-    override fun onBind(intent: Intent?): IBinder? {
-        return null // No binding provided
-    }
+                    val childProfile = dataRepository.getChildrenProfilesForGuardian(userProfile.userId) // Intenta obtener perfiles de niños para el guardián
+                        .firstOrNull()?.firstOrNull { it.childId == currentChildId }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        fusedLocationClient.removeLocationUpdates(locationCallback)
-        serviceJob.cancel() // Cancela todas las coroutines lanzadas en este scope
-        Log.d(TAG, "Location tracking service destroyed")
-    }
+                    currentGuardianId = if (childProfile != null) {
+                        // Si el childProfile se encontró bajo un guardián, ese es el guardianId
+                        // (Esto es si decides que ChildProfile se guarda bajo guardian/children_profiles/{childId})
+                        // Para la estructura actual, necesitarías otro mecanismo para que el niño sepa su guardianId
+                        // Por simplicidad para el prototipo, asumimos que el padre tiene un solo hijo, o que el guardianId se pasa de alguna forma.
+                        // EJEMPLO: Si el perfil del niño tiene un campo `associatedGuardianId`
+                        val childUserProfile = authRepository.getUserProfile(currentChildId!!)
+                        childUserProfile?.associatedChildren?.firstOrNull() // Si el niño tiene un campo que apunte a su guardián
+                    } else {
+                        // Alternativa para el prototipo: Asumir un guardianId conocido o el mismo si el niño es su propio guardián (no aplica aquí).
+                        // O obtenerlo de SharedPreferences si el padre lo ha configurado.
+                        "your_guardian_uid_here" // Reemplaza con un UID de guardián real si es necesario para pruebas
+                    }
 
-    @SuppressLint("MissingPermission") // Asegúrate que los permisos se solicitan y otorgan antes de iniciar el servicio
-    private fun setupLocationTracking() {
-        locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000L) // Actualización cada 5 segundos
-            // .setWaitForActivity(true) // Considera si realmente lo necesitas. Puede retrasar las actualizaciones si no hay actividad.
-            .setMinUpdateIntervalMillis(3000L) // Mínimo 3 segundos entre actualizaciones
-            .build()
+                    if (currentGuardianId == null) {
+                        Log.e("LocationService", "No guardianId found for child $currentChildId. Location data will not be uploaded.")
+                        stopSelf() // Detener el servicio si no se puede determinar el guardián
+                        return@launch
+                    }
+                    Log.d("LocationService", "Child ID: $currentChildId, Guardian ID: $currentGuardianId")
+                    startLocationUpdates()
+                } else {
+                    Log.w("LocationService", "Service started on non-child profile. Stopping service.")
+                    stopSelf()
+                }
+            } else {
+                Log.e("LocationService", "No authenticated user found. Stopping service.")
+                stopSelf()
+            }
+        }
 
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
                 locationResult.lastLocation?.let { location ->
-                    Log.d(TAG, "Location: ${location.latitude}, ${location.longitude}, Accuracy: ${location.accuracy}")
-                    processNewLocation(location)
+                    onNewLocation(location)
                 }
             }
         }
-
-        try {
-            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
-            Log.d(TAG, "Location updates requested.")
-        } catch (e: SecurityException) {
-            Log.e(TAG, "Location permission not granted when requesting updates.", e)
-            // Considerar detener el servicio o notificar al usuario si esto ocurre
-            stopSelf() // Detiene el servicio si no puede operar
-        }
     }
 
-    private fun processNewLocation(location: Location) {
-        serviceScope.launch {
-            // TODO: Obtener el childId dinámicamente. No hardcodear.
-            // Esto podría venir de SharedPreferences, un Intent al iniciar el servicio,
-            // o una base de datos si el servicio es para un niño específico logueado en el dispositivo.
-            val childId = getActiveChildId() // Implementa esta función
-            if (childId == null) {
-                Log.w(TAG, "Child ID not found. Cannot save location or check geofence.")
-                return@launch
-            }
-            dataRepository.saveChildLocation(
-                ChildLocationEntity(
-                    // userId = childId, // This was the field name in my example, your entity has 'childId'
-                    childId = childId ?: "unknown_child", // Ensure childId from getActiveChildId() is used
-                    timestamp = System.currentTimeMillis(),
-                    latitude = location.latitude,
-                    longitude = location.longitude,
-                    accuracy = location.accuracy
-                )
-            )
-            Log.d(TAG, "Child location saved for $childId.")
-            checkGeofenceStatus(location, childId)
-        }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.d("LocationService", "Service onStartCommand")
+        startForeground(NOTIFICATION_ID, createNotification().build()) // <--- AÑADE .build()
+        return START_STICKY
     }
 
-    // TODO: Implementar una forma de obtener el ID del niño activo
-    private suspend fun getActiveChildId(): String? {
-        // Ejemplo: Leerlo de SharedPreferences o de alguna fuente de datos
-        // val sharedPreferences = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-        // return sharedPreferences.getString("current_child_id", null)
-        Log.w(TAG, "getActiveChildId() is not implemented. Using placeholder.")
-        return "child_id_placeholder" // Placeholder - ¡DEBES CAMBIAR ESTO!
+    override fun onBind(intent: Intent?): IBinder? {
+        return null // Este servicio no se enlaza a actividades
     }
 
-    private fun checkGeofenceStatus(currentLocation: Location, childId: String) {
-        serviceScope.launch {
-            try {
-                dataRepository.getGeofencesForChild(childId)
-                    .collect { geofenceAreaList -> // Recolecta el Flow
-                        Log.d(TAG, "Checking ${geofenceAreaList.size} geofences for child $childId.")
-                        if (geofenceAreaList.isEmpty()) {
-                            Log.d(TAG, "No geofences found for child $childId.")
-                            return@collect // Sal de esta iteración de collect si no hay geofences
-                        }
-                        for (geofenceArea in geofenceAreaList) {
-                            val isInside = geofenceHelper.isPointInCircle(
-                                currentLocation.latitude, currentLocation.longitude,
-                                geofenceArea.latitude, geofenceArea.longitude,
-                                geofenceArea.radius
-                            )
-                            // ... tu lógica de comprobación y alerta ...
-                            if (!isInside) {
-                                Log.i(TAG, "Child $childId exited geofence: ${geofenceArea.name}")
-                                dataRepository.sendGeofenceAlert(childId, geofenceArea.name, currentLocation)
-                            } else {
-                                Log.d(TAG, "Child $childId is inside geofence: ${geofenceArea.name}")
-                            }
-                        }
-                    }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error in geofence status flow for child $childId", e)
-            }
-        }
+    override fun onDestroy() {
+        super.onDestroy()
+        Log.d("LocationService", "Service onDestroy")
+        stopLocationUpdates()
+        serviceJob.cancel() // Cancelar todas las corrutinas asociadas al servicio
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channelName = "Aura Guardian Location Service"
             val serviceChannel = NotificationChannel(
-                NOTIFICATION_CHANNEL_ID,
-                channelName,
-                NotificationManager.IMPORTANCE_LOW // Usar LOW o MIN para foreground services que no necesitan atención inmediata
-            ).apply {
-                description = "Channel for Aura Guardian location tracking service."
-            }
+                CHANNEL_ID,
+                "Location Tracking Channel",
+                NotificationManager.IMPORTANCE_DEFAULT
+            )
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(serviceChannel)
-            Log.d(TAG, "Notification channel created.")
         }
     }
 
-    private fun createNotification(): Notification { // Cambiado el tipo de retorno a Notification
-        val notificationIntent = Intent(this, GuardianMainActivity::class.java).apply {
-            // Flags para manejar cómo se comporta la actividad al ser lanzada desde la notificación
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK // O considera FLAG_ACTIVITY_SINGLE_TOP
-        }
-
-        // El requestCode para PendingIntent debe ser único si tienes varios o quieres un comportamiento específico.
-        // FLAG_UPDATE_CURRENT asegura que si el intent cambia, el PendingIntent se actualiza.
-        // FLAG_IMMUTABLE es recomendado por seguridad para intents que no deben ser modificados.
-        val pendingIntentFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+    private fun createNotification(): NotificationCompat.Builder {
+        val notificationIntent = Intent(this, ChildMainActivity::class.java) // Actividad para abrir al tocar la notificación
+        val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         } else {
             PendingIntent.FLAG_UPDATE_CURRENT
         }
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0, // requestCode
-            notificationIntent,
-            pendingIntentFlag
-        )
+        val pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, pendingIntentFlags)
 
-        return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
-            .setContentTitle(getString(R.string.app_name)) // Usar recursos de strings
-            .setContentText(getString(R.string.notification_tracking_location)) // Usar recursos de strings
-            .setSmallIcon(R.drawable.ic_notification_icon) // TODO: Reemplaza con un ícono de notificación adecuado (monocromático)
-            .setOngoing(true) // Indica que la notificación es para un proceso en curso (foreground service)
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Aura Guardian")
+            .setContentText("Seguimiento de ubicación activo para la seguridad del niño.")
+            .setSmallIcon(R.drawable.ic_launcher_foreground) // Asegúrate de tener un icono
             .setContentIntent(pendingIntent)
-            .setPriority(NotificationCompat.PRIORITY_LOW) // Consistente con NotificationManager.IMPORTANCE_LOW
-            .build() // <--- ¡LA MODIFICACIÓN CLAVE!
+            .setOngoing(true) // Hace que la notificación no pueda ser deslizada
+    }
+
+    private fun startLocationUpdates() {
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, LOCATION_INTERVAL_MS)
+            .setMinUpdateIntervalMillis(LOCATION_FASTEST_INTERVAL_MS) // Intervalo más rápido
+            .build()
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+
+            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
+            Log.d("LocationService", "Location updates started.")
+        } else {
+            Log.e("LocationService", "Location permissions not granted. Cannot start updates.")
+            stopSelf() // Detener el servicio si no hay permisos
+        }
+    }
+
+    private fun stopLocationUpdates() {
+        fusedLocationClient.removeLocationUpdates(locationCallback)
+        Log.d("LocationService", "Location updates stopped.")
+    }
+
+    private fun onNewLocation(location: Location) {
+        Log.d("LocationService", "New location: ${location.latitude}, ${location.longitude}")
+
+        currentChildId?.let { childId ->
+            currentGuardianId?.let { guardianId ->
+                val childLocation = ChildLocation(
+                    childId = childId,
+                    timestamp = Timestamp.now(),
+                    geoPoint = com.google.firebase.firestore.GeoPoint(location.latitude, location.longitude),
+                    accuracy = location.accuracy,
+                    speed = location.speed
+                )
+
+                serviceScope.launch {
+                    try {
+                        dataRepository.saveChildLocation(guardianId, childId, childLocation)
+                        Log.d("LocationService", "Location uploaded to Firestore for child $childId")
+                    } catch (e: Exception) {
+                        Log.e("LocationService", "Failed to upload location: ${e.message}", e)
+                    }
+                }
+            } ?: Log.e("LocationService", "Guardian ID is null, cannot upload location.")
+        } ?: Log.e("LocationService", "Child ID is null, cannot upload location.")
     }
 }

@@ -116,6 +116,12 @@ dependencies {
         // Integración de Compose con ViewModels (opcional, pero común)
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.0") // Revisa la última versióN
 
+    implementation("com.patrykandpatrick.vico:compose:1.13.1") // Reemplaza con la última versión
+    implementation("com.patrykandpatrick.vico:core:1.13.1")    // Reemplaza con la última versión
+    // Si necesitas diferentes renderers (e.g., para Material Design 3)
+    implementation("com.patrykandpatrick.vico:compose-m3:1.13.1") // Reemplaza con la última versión
+
+
     // Testing
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

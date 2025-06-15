@@ -3,8 +3,10 @@ package com.example.authguardian.di
 import android.content.Context
 import androidx.room.Room
 import com.example.authguardian.data.local.AppDatabase
-import com.example.authguardian.data.local.dao.HeartRateDao
+import com.example.authguardian.data.local.dao.ChildLocationDao
+import com.example.authguardian.data.local.dao.GeofenceDao
 import com.example.authguardian.data.local.dao.GyroscopeDao
+import com.example.authguardian.data.local.dao.HeartRateDao
 import com.example.authguardian.data.local.dao.MeltdownDao
 import dagger.Module
 import dagger.Provides
@@ -12,7 +14,6 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
-import com.example.authguardian.data.local.dao.GeofenceDao
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -24,8 +25,10 @@ object DatabaseModule {
         return Room.databaseBuilder(
             context,
             AppDatabase::class.java,
-            "auth_guardian_db"
-        ).fallbackToDestructiveMigration() // Solo para desarrollo, quitar en prod
+            "aura_guardian_db"
+        )
+            // Solo para desarrollo. En producción, gestiona las migraciones correctamente.
+            // .fallbackToDestructiveMigration()
             .build()
     }
 
@@ -45,6 +48,12 @@ object DatabaseModule {
     @Provides
     fun provideMeltdownDao(database: AppDatabase): MeltdownDao {
         return database.meltdownDao()
+    }
+
+    @Singleton
+    @Provides
+    fun provideChildLocationDao(database: AppDatabase): ChildLocationDao {
+        return database.childLocationDao()
     }
 
     @Singleton

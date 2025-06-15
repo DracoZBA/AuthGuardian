@@ -5,29 +5,30 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.tooling.data.position
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.lifecycleScope
+import androidx.navigation.fragment.findNavController
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.OnMapReadyCallback
 import com.google.android.gms.maps.SupportMapFragment
+import com.google.android.gms.maps.model.Circle
+import com.google.android.gms.maps.model.CircleOptions
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
-import com.google.android.gms.maps.model.CircleOptions
-import com.google.android.gms.maps.model.Circle
 import com.example.authguardian.R
-import com.example.authguardian.databinding.FragmentMap2Binding // Asegúrate que el binding sea correcto
+import com.example.authguardian.databinding.FragmentMap2Binding
+import com.example.authguardian.models.GeofenceArea // Asegúrate de importar tu modelo
 import com.example.authguardian.service.LocationTrackingService
-import com.example.authguardian.ui.guardian.geofence.GeofenceSetupFragment // Para navegar
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -41,40 +42,35 @@ class MapFragment : Fragment(), OnMapReadyCallback {
     private lateinit var googleMap: GoogleMap
     private val mapViewModel: MapViewModel by viewModels()
 
-    // Para almacenar los círculos de geocercas en el mapa
     private val geofenceCircles = mutableListOf<Circle>()
+    private var childMarker: com.google.android.gms.maps.model.Marker? = null
 
-    // Request permissions launcher
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        when {
-            permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true -> {
-                // Fine location granted. Check background if needed.
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    if (permissions[Manifest.permission.ACCESS_BACKGROUND_LOCATION] == true) {
-                        startLocationTracking()
-                        googleMap.isMyLocationEnabled = true
-                        Toast.makeText(context, "Location permissions granted", Toast.LENGTH_SHORT).show()
-                    } else {
-                        // Request background location
-                        requestBackgroundLocationPermission()
-                    }
-                } else {
+        if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                ContextCompat.checkSelfPermission(
+                    requireContext(),
+                    Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestBackgroundLocationPermission()
+            } else {
+                // El mapa ya debería estar listo o a punto de estarlo si se conceden aquí.
+                // startLocationTracking y enableMyLocationOnMap se llamarán desde onMapReady
+                // después de que checkAndRequestLocationPermissions determine que los permisos están concedidos.
+                if (::googleMap.isInitialized) {
                     startLocationTracking()
-                    googleMap.isMyLocationEnabled = true
-                    Toast.makeText(context, "Location permission granted", Toast.LENGTH_SHORT).show()
+                    enableMyLocationOnMap()
                 }
             }
-            permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true -> {
-                // Only coarse location granted
-                Toast.makeText(context, "Coarse location granted. For better accuracy, enable fine location.", Toast.LENGTH_LONG).show()
-                startLocationTracking()
-                googleMap.isMyLocationEnabled = true
-            }
-            else -> {
-                Toast.makeText(context, "Location permissions denied. Map and tracking will be limited.", Toast.LENGTH_LONG).show()
-            }
+        } else {
+            Toast.makeText(
+                context,
+                "Permisos de ubicación denegados. El mapa y el seguimiento serán limitados.",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 
@@ -82,15 +78,19 @@ class MapFragment : Fragment(), OnMapReadyCallback {
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            startLocationTracking()
-            googleMap.isMyLocationEnabled = true
-            Toast.makeText(context, "Background location granted", Toast.LENGTH_SHORT).show()
+            if (::googleMap.isInitialized) { // Asegurarse de que el mapa esté listo
+                startLocationTracking()
+                enableMyLocationOnMap() // Puede que quieras volver a habilitar si se denegó antes
+            }
+            Toast.makeText(context, "Permiso de ubicación en segundo plano concedido", Toast.LENGTH_SHORT).show()
         } else {
-            Toast.makeText(context, "Background location denied. Geofence alerts may not work correctly when app is in background.", Toast.LENGTH_LONG).show()
-            // Optionally explain why background location is needed.
+            Toast.makeText(
+                context,
+                "Permiso de ubicación en segundo plano denegado. Las alertas pueden no funcionar con la app cerrada.",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
-
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -103,57 +103,91 @@ class MapFragment : Fragment(), OnMapReadyCallback {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        val mapFragment = childFragmentManager.findFragmentById(R.id.map) as SupportMapFragment?
-        mapFragment?.getMapAsync(this)
+        val mapFragment = childFragmentManager.findFragmentById(R.id.map) as? SupportMapFragment
+        mapFragment?.getMapAsync(this) // Inicia la carga del mapa
 
         binding.fabAddGeofence.setOnClickListener {
-            // Navegar al fragmento de configuración de geocercas
-            // Asume que tienes una acción definida en mobile_navigation.xml
-            // findNavController().navigate(R.id.action_mapFragment_to_geofenceSetupFragment)
-            // O si usas Safe Args:
-            // findNavController().navigate(MapFragmentDirections.actionMapFragmentToGeofenceSetupFragment())
-            Toast.makeText(context, "Navigate to Geofence Setup", Toast.LENGTH_SHORT).show() // Placeholder
+            findNavController().navigate(R.id.action_mapFragment_to_geofenceSetupFragment)
         }
     }
 
     override fun onMapReady(map: GoogleMap) {
-        googleMap = map
+        googleMap = map // Mapa inicializado
         Log.d("MapFragment", "Map is ready")
 
-        // Configurar el mapa inicial (ej. Arequipa, Perú)
-        val arequipa = LatLng(-16.409047, -71.537451)
-        googleMap.addMarker(MarkerOptions().position(arequipa).title("Arequipa, Peru"))
-        googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(arequipa, 15f)) // Nivel de zoom
+        val defaultLocation = LatLng(-16.409047, -71.537451) // Arequipa, Perú
+        googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(defaultLocation, 10f))
 
-        // Habilitar la capa "My Location" si se tienen permisos
-        checkAndRequestLocationPermissions()
+        checkAndRequestLocationPermissions() // Solicita permisos y luego habilita funciones del mapa si se conceden
+
+        // Observar el niño seleccionado para iniciar la carga de su ubicación y geocercas
+        viewLifecycleOwner.lifecycleScope.launch {
+            mapViewModel.selectedChildProfile.collectLatest { childProfile ->
+                if (childProfile != null) {
+                    Log.d("MapFragment", "Selected child changed to: ${childProfile.name}.")
+                    // La lógica de carga ya está en los otros colectores.
+                    // Si se selecciona un nuevo niño, los flows de childLocation y childGeofences
+                    // deberían emitir nuevos valores y actualizar el mapa.
+                } else {
+                    Log.d("MapFragment", "No child selected. Clearing map of child-specific data.")
+                    googleMap.clear() // Limpia marcadores, círculos, polilíneas, etc.
+                    childMarker = null // Resetea la referencia al marcador del niño
+                    geofenceCircles.clear() // Aunque clear() los elimina del mapa, limpia tu lista local
+                }
+            }
+        }
 
         // Observar la ubicación actual del niño
-        lifecycleScope.launch {
-            mapViewModel.childCurrentLocation.collectLatest { location ->
-                location?.let {
-                    val childLatLng = LatLng(it.latitude, it.longitude)
-                    googleMap.clear() // Limpiar marcadores anteriores
-                    // Volver a añadir el marcador de la ciudad inicial si es necesario
-                    // googleMap.addMarker(MarkerOptions().position(arequipa).title("Arequipa, Peru"))
+        viewLifecycleOwner.lifecycleScope.launch {
+            mapViewModel.childLocation.collectLatest { location ->
+                location?.geoPoint?.let { geoPoint ->
+                    val childLatLng = LatLng(geoPoint.latitude, geoPoint.longitude)
 
-                    googleMap.addMarker(MarkerOptions().position(childLatLng).title("Ubicación del Niño"))
-                    // Puedes animar la cámara si la ubicación cambia significativamente
-                    // googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(childLatLng, 17f))
-                    Log.d("MapFragment", "Child location updated: ${it.latitude}, ${it.longitude}")
+                    if (childMarker == null) {
+                        childMarker = googleMap.addMarker(
+                            MarkerOptions().position(childLatLng).title("Ubicación del Niño")
+                        )
+                    } else {
+                        childMarker?.position = childLatLng
+                    }
+                    // Solo animar la cámara si el niño está seleccionado
+                    if (mapViewModel.selectedChildProfile.value != null) {
+                        googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(childLatLng, 15f))
+                    }
+                    Log.d("MapFragment", "Child location updated: ${geoPoint.latitude}, ${geoPoint.longitude}")
 
-                    // Redibujar las geocercas
-                    drawGeofencesOnMap()
+                    // Considera si es necesario redibujar geocercas aquí.
+                    // Si las geocercas dependen del niño y no de su ubicación actual,
+                    // el colector de childGeofences es suficiente.
+                    // drawGeofencesOnMap(mapViewModel.childGeofences.value)
                 }
             }
         }
 
         // Observar las geocercas guardadas para dibujarlas
-        lifecycleScope.launch {
-            mapViewModel.geofences.collectLatest { geofences ->
-                Log.d("MapFragment", "Geofences updated: ${geofences.size}")
-                drawGeofencesOnMap() // Redibujar cada vez que cambian las geocercas
+        viewLifecycleOwner.lifecycleScope.launch {
+            mapViewModel.childGeofences.collectLatest { geofenceList ->
+                Log.d("MapFragment", "Geofences list updated: ${geofenceList.size}")
+                drawGeofencesOnMap(geofenceList)
             }
+        }
+    }
+
+    private fun enableMyLocationOnMap() {
+        if (!::googleMap.isInitialized) {
+            Log.w("MapFragment", "enableMyLocationOnMap called before map was ready.")
+            return
+        }
+        try {
+            if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                googleMap.isMyLocationEnabled = true
+                Toast.makeText(context, "Capa 'Mi Ubicación' habilitada.", Toast.LENGTH_SHORT).show()
+            } else {
+                Log.w("MapFragment", "enableMyLocationOnMap: Location permission not granted.")
+            }
+        } catch (e: SecurityException) {
+            Log.e("MapFragment", "SecurityException en enableMyLocationOnMap", e)
         }
     }
 
@@ -162,31 +196,27 @@ class MapFragment : Fragment(), OnMapReadyCallback {
             requireContext(), Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
 
-        val coarseLocationGranted = ContextCompat.checkSelfPermission(
-            requireContext(), Manifest.permission.ACCESS_COARSE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-
-        val backgroundLocationGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ContextCompat.checkSelfPermission(
-                requireContext(), Manifest.permission.ACCESS_BACKGROUND_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        } else true // Not required for API < 29
-
         val permissionsToRequest = mutableListOf<String>()
         if (!fineLocationGranted) {
             permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
-        if (!coarseLocationGranted && !fineLocationGranted) { // Request coarse if fine is not granted
-            permissionsToRequest.add(Manifest.permission.ACCESS_COARSE_LOCATION)
         }
 
         if (permissionsToRequest.isNotEmpty()) {
             requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
         } else {
-            // Permissions already granted
-            startLocationTracking()
-            googleMap.isMyLocationEnabled = true
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !backgroundLocationGranted) {
+            // Permiso ACCESS_FINE_LOCATION ya concedido
+            // Asegurarse de que el mapa esté listo antes de interactuar con él
+            if (::googleMap.isInitialized) {
+                startLocationTracking()
+                enableMyLocationOnMap()
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                ContextCompat.checkSelfPermission(
+                    requireContext(),
+                    Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
                 requestBackgroundLocationPermission()
             }
         }
@@ -194,57 +224,71 @@ class MapFragment : Fragment(), OnMapReadyCallback {
 
     private fun requestBackgroundLocationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            if (ContextCompat.checkSelfPermission(
-                    requireContext(),
-                    Manifest.permission.ACCESS_BACKGROUND_LOCATION
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                if (shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_BACKGROUND_LOCATION)) {
-                    // Explica al usuario por qué necesitas este permiso antes de solicitarlo
-                    Toast.makeText(context, "Background location is needed for geofence alerts when app is closed.", Toast.LENGTH_LONG).show()
-                    requestBackgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-                } else {
-                    // Directamente solicita el permiso
-                    requestBackgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-                }
+            if (shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_BACKGROUND_LOCATION)) {
+                Toast.makeText(
+                    context,
+                    "La ubicación en segundo plano es para alertas de geocerca con la app cerrada.",
+                    Toast.LENGTH_LONG
+                ).show()
             }
+            requestBackgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
         }
     }
-
 
     private fun startLocationTracking() {
-        val serviceIntent = Intent(requireContext(), LocationTrackingService::class.java)
-        // Asegúrate de iniciar como un Foreground Service para Android 8+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            requireContext().startForegroundService(serviceIntent)
+        Log.d("MapFragment", "startLocationTracking llamado.")
+        if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            val serviceIntent = Intent(requireContext(), LocationTrackingService::class.java)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    requireContext().startForegroundService(serviceIntent)
+                } else {
+                    requireContext().startService(serviceIntent)
+                }
+            } catch (e: Exception) {
+                Log.e("MapFragment", "Error starting LocationTrackingService", e)
+            }
         } else {
-            requireContext().startService(serviceIntent)
+            Log.w("MapFragment", "startLocationTracking: Permiso de ubicación fina no concedido.")
         }
     }
 
-    private fun drawGeofencesOnMap() {
-        // Limpiar círculos de geocercas anteriores
+    private fun drawGeofencesOnMap(geofencesToDraw: List<GeofenceArea>) {
+        if (!::googleMap.isInitialized) {
+            Log.w("MapFragment", "drawGeofencesOnMap called before map was ready.")
+            return
+        }
+
+        // Limpiar solo los círculos de geocercas anteriores del mapa y de la lista local
         geofenceCircles.forEach { it.remove() }
         geofenceCircles.clear()
 
-        mapViewModel.geofences.value.forEach { geofence ->
+        Log.d("MapFragment", "Drawing ${geofencesToDraw.size} geofences on map.")
+        geofencesToDraw.forEach { geofence ->
             val center = LatLng(geofence.latitude, geofence.longitude)
-            val circle = googleMap.addCircle(
-                CircleOptions()
-                    .center(center)
-                    .radius(geofence.radius.toDouble()) // Radio en metros
-                    .strokeColor(ContextCompat.getColor(requireContext(), R.color.primary_dark_blue))
-                    .fillColor(ContextCompat.getColor(requireContext(), R.color.primary_blue_light_transparent)) // Define un color transparente si quieres
-                    .strokeWidth(2f)
-            )
-            geofenceCircles.add(circle)
+            val radiusInMeters = geofence.radius
 
-            googleMap.addMarker(MarkerOptions().position(center).title(geofence.name))
+            Log.d("MapFragment", "Drawing geofence: ${geofence.name} at $center with radius $radiusInMeters")
+
+            val circleOptions = CircleOptions()
+                .center(center)
+                .radius(radiusInMeters)
+                .strokeColor(ContextCompat.getColor(requireContext(), R.color.primary_dark_blue)) // Asegúrate que este color existe
+                .fillColor(ContextCompat.getColor(requireContext(), R.color.primary_blue_light_transparent)) // Asegúrate que este color existe
+                .strokeWidth(2f)
+
+            googleMap.addCircle(circleOptions)?.let {
+                geofenceCircles.add(it) // Añadir el nuevo círculo a la lista para seguimiento
+            }
         }
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
+        // El objeto googleMap se libera con el ciclo de vida del SupportMapFragment.
+        // Limpiar referencias para ayudar al GC.
+        childMarker = null
+        geofenceCircles.clear() // Limpia la lista, los círculos en el mapa se van con el mapa.
         _binding = null
     }
 }

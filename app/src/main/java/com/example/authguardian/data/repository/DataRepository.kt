@@ -1,236 +1,131 @@
 package com.example.authguardian.data.repository
 
 import android.content.Context
-import android.location.Location
 import android.util.Log
+import com.example.authguardian.data.local.AppDatabase
+import com.example.authguardian.data.local.dao.ChildLocationDao
+import com.example.authguardian.data.local.dao.GeofenceDao
+import com.example.authguardian.data.local.dao.GyroscopeDao
+import com.example.authguardian.data.local.dao.HeartRateDao
+import com.example.authguardian.data.local.dao.MeltdownDao
+import com.example.authguardian.data.remote.FirebaseDataSource // Importa tu nuevo DataSource
+import com.example.authguardian.models.*
+import kotlinx.coroutines.tasks.await
+import com.example.authguardian.util.GeofenceHelper
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingClient
 import com.google.android.gms.location.LocationServices
-import com.google.firebase.firestore.FirebaseFirestore
-import com.example.authguardian.data.local.AppDatabase
-import com.example.authguardian.data.local.dao.GeofenceDao
-import com.example.authguardian.data.local.entities.ChildLocationEntity
-import com.example.authguardian.data.local.entities.GeofenceEntity
-import com.example.authguardian.models.GeofenceArea
-import com.example.authguardian.util.GeofenceHelper
-import com.example.authguardian.util.NotificationHelper
-import dagger.hilt.android.qualifiers.ApplicationContext
+import com.google.firebase.Timestamp
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.tasks.await
-import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class DataRepository @Inject constructor(
-    @ApplicationContext private val context: Context,
-    private val firestore: FirebaseFirestore,
-    private val appDatabase: AppDatabase,
-    private val geofenceHelper: GeofenceHelper
+    private val context: Context,
+    private val firebaseDataSource: FirebaseDataSource, // Inyecta el DataSource
+    private val appDatabase: AppDatabase, // Room Database (para cacheo o datos locales)
+    private val geofenceHelper: GeofenceHelper,
+    // DAOs de Room (manténlos para posible cacheo local o funcionalidad offline)
+    private val heartRateDao: HeartRateDao,
+    private val gyroscopeDao: GyroscopeDao,
+    private val meltdownDao: MeltdownDao,
+    private val childLocationDao: ChildLocationDao,
+    private val geofenceDao: GeofenceDao
 ) {
-    private val geofenceDao: GeofenceDao = appDatabase.geofenceDao()
     private val geofencingClient: GeofencingClient = LocationServices.getGeofencingClient(context)
 
-    companion object {
-        private const val TAG = "DataRepository"
+    // --- Funciones para la APLICACIÓN DEL NIÑO (subir datos a Firestore) ---
+
+    suspend fun saveHeartRateData(guardianId: String, childId: String, data: HeartRateData) {
+        firebaseDataSource.saveHeartRateData(guardianId, childId, data)
     }
 
-    // --- Flujo de ubicación en tiempo real ---
-    private val _childCurrentLocation = MutableStateFlow<ChildLocationEntity?>(null)
-    val childCurrentLocation: StateFlow<ChildLocationEntity?> = _childCurrentLocation
-
-    // --- Conversiones entre Entity y Model ---
-    private fun GeofenceEntity.toGeofenceArea(): GeofenceArea {
-        return GeofenceArea(id, name, latitude, longitude, radius, userId)
+    suspend fun saveGyroscopeData(guardianId: String, childId: String, data: GyroscopeData) {
+        firebaseDataSource.saveGyroscopeData(guardianId, childId, data)
     }
 
-    private fun GeofenceArea.toGeofenceEntity(): GeofenceEntity {
-        return GeofenceEntity(id, name, latitude, longitude, radius, userId)
+    suspend fun saveMeltdownEvent(guardianId: String, childId: String, event: MeltdownEvent) {
+        firebaseDataSource.saveMeltdownEvent(guardianId, childId, event)
     }
 
-    // --- Manejo de ubicación ---
-    suspend fun saveChildLocation(location: ChildLocationEntity) {
-        try {
-            // Guardar localmente
-            appDatabase.childLocationDao().insertLocation(location)
-
-            // Actualizar flujo
-            _childCurrentLocation.value = location
-
-            // Opcional: Sincronizar con Firestore
-            firestore.collection("child_locations")
-                .document(location.childId)
-                .set(location)
-                .await()
-
-            Log.d(TAG, "Child location saved: ${location.latitude}, ${location.longitude}")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error saving child location", e)
-            throw e
-        }
+    suspend fun saveChildLocation(guardianId: String, childId: String, location: ChildLocation) {
+        firebaseDataSource.saveChildLocation(guardianId, childId, location)
     }
 
-    // --- Geofences ---
-    @Throws(Exception::class)
-    suspend fun addGeofence(geofenceArea: GeofenceArea) {
-        val geofence = geofenceHelper.getGeofence(
-            geofenceArea.id,
-            com.google.android.gms.maps.model.LatLng(geofenceArea.latitude, geofenceArea.longitude),
-            geofenceArea.radius,
+    // Aquí, la lógica de añadir/eliminar a la API de Play Services sigue siendo responsabilidad del DataRepository,
+    // ya que no es una interacción directa con Firestore, sino con el sistema Android.
+    suspend fun saveGeofence(guardianId: String, childId: String, geofence: GeofenceArea) {
+        firebaseDataSource.saveGeofence(guardianId, childId, geofence)
+        addGeofenceToSystem(geofence) // Esta función se ejecutaría en el dispositivo del NIÑO
+    }
+
+    @Throws(SecurityException::class, Exception::class)
+    private suspend fun addGeofenceToSystem(geofence: GeofenceArea) {
+        val gf = geofenceHelper.getGeofence(
+            geofence.id,
+            // Usa geofence.latitude y geofence.longitude directamente
+            com.google.android.gms.maps.model.LatLng(geofence.latitude, geofence.longitude), // <--- CAMBIO AQUÍ
+            geofence.radius.toFloat(), // Asegúrate de que el radio sea Float si getGeofence lo espera
             Geofence.GEOFENCE_TRANSITION_ENTER or Geofence.GEOFENCE_TRANSITION_EXIT
         )
+        val geofencingRequest = geofenceHelper.getGeofencingRequest(gf)
+        val pendingIntent = geofenceHelper.getPendingIntent()
 
         try {
-            // Registrar en sistema Android
-            geofencingClient.addGeofences(
-                geofenceHelper.getGeofencingRequest(geofence),
-                geofenceHelper.getPendingIntent()
-            ).await()
-
-            // Guardar localmente
-            geofenceDao.insertGeofence(geofenceArea.toGeofenceEntity())
-
-            // Sincronizar con Firestore
-            firestore.collection("geofences")
-                .document(geofenceArea.id)
-                .set(geofenceArea)
-                .await()
-
-            Log.d(TAG, "Geofence added: ${geofenceArea.name}")
+            geofencingClient.addGeofences(geofencingRequest, pendingIntent).await()
+            Log.d("DataRepository", "Geofence '${geofence.name}' added to Play Services system.")
         } catch (e: SecurityException) {
-            Log.e(TAG, "Location permissions not granted", e)
-            throw Exception("Location permissions required")
+            Log.e("DataRepository", "Location permissions not granted for geofencing: ${e.message}")
+            throw e
         } catch (e: Exception) {
-            Log.e(TAG, "Error adding geofence", e)
+            Log.e("DataRepository", "Error adding geofence to system: ${e.message}", e)
             throw e
         }
     }
 
-    @Throws(Exception::class)
-    suspend fun removeGeofence(geofenceId: String) {
+    suspend fun removeGeofence(guardianId: String, childId: String, geofenceId: String) {
+        firebaseDataSource.deleteGeofence(guardianId, childId, geofenceId)
+        removeGeofenceFromSystem(geofenceId)
+    }
+
+    private suspend fun removeGeofenceFromSystem(geofenceId: String) {
         try {
-            // Remover del sistema Android
             geofencingClient.removeGeofences(listOf(geofenceId)).await()
-
-            // Eliminar localmente
-            geofenceDao.deleteGeofence(geofenceId)
-
-            // Eliminar de Firestore
-            firestore.collection("geofences")
-                .document(geofenceId)
-                .delete()
-                .await()
-
-            Log.d(TAG, "Geofence removed: $geofenceId")
+            Log.d("DataRepository", "Geofence '$geofenceId' removed from Play Services system.")
         } catch (e: Exception) {
-            Log.e(TAG, "Error removing geofence", e)
+            Log.e("DataRepository", "Error removing geofence from system: ${e.message}", e)
             throw e
         }
     }
 
-    fun getGeofencesForChild(userId: String): Flow<List<GeofenceArea>> {
-        return geofenceDao.getGeofencesForUser(userId)
-            .map { entities -> entities.map { it.toGeofenceArea() } }
+    // --- Funciones para la APLICACIÓN DEL PADRE (leer datos de Firestore) ---
+
+    fun getChildrenProfilesForGuardian(guardianId: String): Flow<List<ChildProfile>> {
+        return firebaseDataSource.getChildrenProfilesStream(guardianId)
     }
 
-    // --- Procesamiento de MQTT ---
-    suspend fun processMqttData(topic: String?, payload: String) {
-        if (topic == null) return
-
-        Log.d(TAG, "Processing MQTT - Topic: $topic, Payload: $payload")
-
-        try {
-            val json = JSONObject(payload)
-            val childId = json.optString("childId", "default")
-
-            when {
-                // Procesamiento de ubicación
-                topic.contains("location") -> processLocationData(childId, json)
-
-                // Procesamiento de ritmo cardíaco
-                topic.contains("heart") -> processHeartRateData(childId, json)
-
-                // Procesamiento de datos del giroscopio
-                topic.contains("gyro") -> processGyroData(childId, json)
-
-                else -> Log.w(TAG, "Unhandled MQTT topic: $topic")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error processing MQTT data", e)
-        }
+    fun getChildCurrentLocation(guardianId: String, childId: String): Flow<ChildLocation?> {
+        return firebaseDataSource.getChildLocationStream(guardianId, childId)
     }
 
-    private suspend fun processLocationData(childId: String, json: JSONObject) {
-        val location = ChildLocationEntity(
-            childId = childId,
-            timestamp = json.optLong("timestamp", System.currentTimeMillis()),
-            latitude = json.getDouble("latitude"),
-            longitude = json.getDouble("longitude"),
-            accuracy = json.optDouble("accuracy", 0.0).toFloat()
-        )
-        saveChildLocation(location)
-
-        // Aquí podrías añadir detección de geocercas
+    fun getHeartRateDataStream(guardianId: String, childId: String, startTime: Timestamp, endTime: Timestamp): Flow<List<HeartRateData>> {
+        return firebaseDataSource.getHeartRateDataStream(guardianId, childId, startTime, endTime)
     }
 
-    private suspend fun processHeartRateData(childId: String, json: JSONObject) {
-        val heartRate = json.getInt("heartRate")
-        // Guardar en base de datos
-        // appDatabase.heartRateDao().insert(HeartRateEntity(...))
-
-        // Aquí podrías añadir detección de crisis
+    fun getGyroscopeDataStream(guardianId: String, childId: String, startTime: Timestamp, endTime: Timestamp): Flow<List<GyroscopeData>> {
+        return firebaseDataSource.getGyroscopeDataStream(guardianId, childId, startTime, endTime)
     }
 
-    private suspend fun processGyroData(childId: String, json: JSONObject) {
-        val x = json.getDouble("x")
-        val y = json.getDouble("y")
-        val z = json.getDouble("z")
-        // Guardar en base de datos
-        // appDatabase.gyroDao().insert(GyroEntity(...))
+    fun getMeltdownEventsStream(guardianId: String, childId: String, startTime: Timestamp, endTime: Timestamp): Flow<List<MeltdownEvent>> {
+        return firebaseDataSource.getMeltdownEventsStream(guardianId, childId, startTime, endTime)
     }
 
-    // --- Notificaciones y alertas ---
-    suspend fun recordGeofenceTransition(
-        geofenceId: String,
-        transitionType: String,
-        location: Location
-    ) {
-        try {
-            val event = hashMapOf(
-                "geofenceId" to geofenceId,
-                "transitionType" to transitionType,
-                "timestamp" to System.currentTimeMillis(),
-                "latitude" to location.latitude,
-                "longitude" to location.longitude
-            )
-
-            firestore.collection("geofence_transitions")
-                .add(event)
-                .await()
-
-            Log.d(TAG, "Geofence transition recorded: $geofenceId")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error recording geofence transition", e)
-        }
+    fun getGeofencesStream(guardianId: String, childId: String): Flow<List<GeofenceArea>> {
+        return firebaseDataSource.getGeofencesStream(guardianId, childId)
     }
 
-    suspend fun sendGeofenceAlert(
-        childId: String,
-        geofenceName: String,
-        location: Location
-    ) {
-        val message = "Alerta: $childId ha entrado/salido de $geofenceName " +
-                "(${location.latitude}, ${location.longitude})"
-
-        NotificationHelper.sendGeofencePushNotification(
-            context,
-            "Alerta de Geocerca",
-            message
-        )
-
-        Log.d(TAG, "Geofence alert sent: $message")
+    fun getUserGraphsStream(userId: String): Flow<List<UserGraph>> {
+        return firebaseDataSource.getUserGraphsStream(userId)
     }
 }

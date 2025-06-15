@@ -1,60 +1,107 @@
 package com.example.authguardian.ui.auth
 
 import android.os.Bundle
-import androidx.fragment.app.Fragment
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ArrayAdapter
+import android.widget.Toast
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.activityViewModels
+import androidx.lifecycle.lifecycleScope
+import androidx.navigation.fragment.findNavController
 import com.example.authguardian.R
+import com.example.authguardian.databinding.FragmentRegisterBinding // Make sure this binding is generated!
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
 
-// TODO: Rename parameter arguments, choose names that match
-// the fragment initialization parameters, e.g. ARG_ITEM_NUMBER
-private const val ARG_PARAM1 = "param1"
-private const val ARG_PARAM2 = "param2"
-
-/**
- * A simple [Fragment] subclass.
- * Use the [RegisterFragment.newInstance] factory method to
- * create an instance of this fragment.
- */
+@AndroidEntryPoint
 class RegisterFragment : Fragment() {
-    // TODO: Rename and change types of parameters
-    private var param1: String? = null
-    private var param2: String? = null
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        arguments?.let {
-            param1 = it.getString(ARG_PARAM1)
-            param2 = it.getString(ARG_PARAM2)
-        }
-    }
+    private var _binding: FragmentRegisterBinding? = null
+    private val binding get() = _binding!!
+
+    // Use activityViewModels() to share the ViewModel with AuthActivity and other fragments
+    private val authViewModel: AuthViewModel by activityViewModels()
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
         savedInstanceState: Bundle?
-    ): View? {
-        // Inflate the layout for this fragment
-        return inflater.inflate(R.layout.fragment_register, container, false)
+    ): View {
+        _binding = FragmentRegisterBinding.inflate(inflater, container, false)
+        return binding.root
     }
 
-    companion object {
-        /**
-         * Use this factory method to create a new instance of
-         * this fragment using the provided parameters.
-         *
-         * @param param1 Parameter 1.
-         * @param param2 Parameter 2.
-         * @return A new instance of fragment RegisterFragment.
-         */
-        // TODO: Rename and change types and number of parameters
-        @JvmStatic
-        fun newInstance(param1: String, param2: String) =
-            RegisterFragment().apply {
-                arguments = Bundle().apply {
-                    putString(ARG_PARAM1, param1)
-                    putString(ARG_PARAM2, param2)
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+
+        setupRoleSpinner()
+        setupListeners()
+        observeAuthState()
+    }
+
+    private fun setupRoleSpinner() {
+        val roles = arrayOf("guardian", "child") // Define roles
+        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, roles)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        binding.spinnerRole.adapter = adapter
+    }
+
+    private fun setupListeners() {
+        // Set up register button click listener
+        binding.btnRegister.setOnClickListener {
+            val email = binding.etEmail.text.toString().trim()
+            val password = binding.etPassword.text.toString().trim()
+            val selectedRole = binding.spinnerRole.selectedItem.toString()
+
+            if (email.isNotEmpty() && password.isNotEmpty()) {
+                authViewModel.register(email, password, selectedRole)
+            } else {
+                Toast.makeText(requireContext(), "Please enter email and password.", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // Set up login text click listener to navigate back
+        binding.tvLogin.setOnClickListener {
+            findNavController().navigate(R.id.action_registerFragment_to_loginFragment)
+        }
+    }
+
+    private fun observeAuthState() {
+        lifecycleScope.launch {
+            authViewModel.authState.collect { authState ->
+                when (authState) {
+                    AuthViewModel.AuthState.Loading -> {
+                        binding.progressBar.visibility = View.VISIBLE
+                        binding.btnRegister.isEnabled = false // Disable button while loading
+                    }
+                    AuthViewModel.AuthState.Unauthenticated -> {
+                        binding.progressBar.visibility = View.GONE
+                        binding.btnRegister.isEnabled = true
+                    }
+                    is AuthViewModel.AuthState.Error -> {
+                        binding.progressBar.visibility = View.GONE
+                        binding.btnRegister.isEnabled = true
+                        Toast.makeText(requireContext(), "Registration Error: ${authState.message}", Toast.LENGTH_LONG).show()
+                    }
+                    // For successful registration, we generally navigate back to login
+                    // or let AuthActivity handle the final navigation.
+                    // If registration is successful, the AuthActivity's observeAuthState will
+                    // eventually navigate to GuardianMainActivity or ChildMainActivity.
+                    is AuthViewModel.AuthState.AuthenticatedAsChild,
+                    is AuthViewModel.AuthState.AuthenticatedAsGuardian -> {
+                        binding.progressBar.visibility = View.GONE
+                        // If you want to show a success message *before* navigating away, do it here
+                        Toast.makeText(requireContext(), "Registration successful!", Toast.LENGTH_SHORT).show()
+                        // AuthActivity will handle navigation to main screens
+                    }
                 }
             }
+        }
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        _binding = null // Clear binding when view is destroyed to prevent memory leaks
     }
 }
