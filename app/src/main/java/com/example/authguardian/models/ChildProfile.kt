@@ -1,9 +1,11 @@
 package com.example.authguardian.models
 
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.DocumentId // Importa la anotación
 
 data class ChildProfile(
-    val childId: String = "", // Este será el UID del usuario "child"
+    @DocumentId // <--- ¡Añadido aquí!
+    val childId: String = "", // Este será el UID del documento en Firestore
     val name: String = "",
     val dob: Timestamp = Timestamp(0, 0), // Fecha de nacimiento
     val avatarUrl: String? = null,
