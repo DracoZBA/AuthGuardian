@@ -1,16 +1,13 @@
 package com.example.authguardian;
 
 import android.app.Application;
-import dagger.hilt.android.HiltAndroidApp; // <-- IMPORTA ESTO
+import dagger.hilt.android.HiltAndroidApp;
 
-@HiltAndroidApp // <-- AÑADE ESTA ANOTACIÓN
+@HiltAndroidApp
 public class AuthGuardianApplication extends Application {
-
-    // Si no tienes un método onCreate, está bien.
-    // Si lo tienes o lo necesitas para otra inicialización, mantenlo:
-    // @Override
-    // public void onCreate() {
-    //     super.onCreate();
-    //     // Otro código de inicialización si es necesario
-    // }
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        // Aquí puedes realizar inicializaciones globales si es necesario.
+    }
 }

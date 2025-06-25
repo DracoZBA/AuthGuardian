@@ -21,6 +21,7 @@ android {
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         testInstrumentationRunnerArguments["runnerBuilder"] = "de.mannodermaus.junit5.AndroidJUnit5Builder"
+        buildConfigField("String", "GEMINI_API_KEY", "\"AIzaSyDApRKXP8o9BodUCIkV7Ijbdcp7u23ado4\"")
     }
 
     buildTypes {
@@ -42,7 +43,9 @@ android {
     buildFeatures {
         viewBinding = true
         compose = true
+        buildConfig = true
     }
+
 
 }
 
@@ -120,6 +123,8 @@ dependencies {
     implementation("com.patrykandpatrick.vico:core:1.13.1")    // Reemplaza con la última versión
     // Si necesitas diferentes renderers (e.g., para Material Design 3)
     implementation("com.patrykandpatrick.vico:compose-m3:1.13.1") // Reemplaza con la última versión
+    //IA
+    implementation("com.google.ai.client.generativeai:generativeai:0.8.0") // O la versión más reciente
 
 
     // Testing

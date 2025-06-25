@@ -16,6 +16,10 @@
     <string name="notification_tracking_location">Tracking child\'s location...</string>
     <string name="notification_monitoring_data">Monitoring child\'s data...</string>
 
+    <string name="ai_analysis_placeholder_initial">Aquí aparecerá el análisis de datos de Gemini AI. Selecciona un niño y pulsa "Analizar".</string>
+    <string name="ai_analysis_placeholder_analyzing">Analizando datos con Gemini AI, por favor espera...</string>
+    <string name="ai_analysis_placeholder_no_result">No se pudo generar el análisis de IA o no hay datos disponibles.</string>
+
 
     <string name="geofence_not_available">Geofence service is not available now. Go to Settings &gt; Location &gt; Mode and set it to High accuracy.</string>
     <string name="geofence_too_many_geofences">Your app has registered too many geofences.</string>
